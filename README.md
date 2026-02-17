@@ -1,6 +1,6 @@
-# Siphon Struct (Siphon Core)
+# SM Core (sm-core)
 
-Архитектура и база знаний ETL-сервиса синхронизации данных из соцсетей.
+Social Monitoring Core — архитектура и база знаний ETL-сервиса синхронизации данных из соцсетей.
 
 ## О проекте
 
@@ -18,6 +18,11 @@
 | [05-DATA-CONTRACTS](docs/05-DATA-CONTRACTS.md) | Контракты данных |
 | [06-OBSERVABILITY](docs/06-OBSERVABILITY.md) | Логи, трейсы, инциденты |
 | [07-RESILIENCE-RESTART](docs/07-RESILIENCE-RESTART.md) | Идемпотентность, докачка |
+| [08-IMPLEMENTATION-ROADMAP](08-IMPLEMENTATION-ROADMAP.md) | Пошаговый роадмап от нуля до синка (промпт-постановка) |
+
+## AI-prompt
+
+[ai-prompt.md](ai-prompt.md) - базовый промпт с описанием структуры
 
 ## Стек
 

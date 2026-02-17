@@ -1,6 +1,6 @@
 # Контракты данных
 
-**Навигация:** [00](00-INDEX.md) | [01](01-ORCHESTRATOR-CHOICE.md) | [02](02-TECH-STACK.md) | [03](03-DEPLOYMENT-ARCHITECTURE.md) | [04](04-SYNC-FLOW.md) | [05](05-DATA-CONTRACTS.md) | [06](06-OBSERVABILITY.md) | [07](07-RESILIENCE-RESTART.md) | [← Назад](04-SYNC-FLOW.md) | [Далее →](06-OBSERVABILITY.md)
+**Навигация:** [README](../README.md) | [Меню](00-INDEX.md) | [← Назад](04-SYNC-FLOW.md) | [Далее →](06-OBSERVABILITY.md)
 
 ---
 

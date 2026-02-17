@@ -1,6 +1,6 @@
 # Технологический стек
 
-**Навигация:** [00](00-INDEX.md) | [01](01-ORCHESTRATOR-CHOICE.md) | [02](02-TECH-STACK.md) | [03](03-DEPLOYMENT-ARCHITECTURE.md) | [04](04-SYNC-FLOW.md) | [05](05-DATA-CONTRACTS.md) | [06](06-OBSERVABILITY.md) | [07](07-RESILIENCE-RESTART.md) | [← Назад](01-ORCHESTRATOR-CHOICE.md) | [Далее →](03-DEPLOYMENT-ARCHITECTURE.md)
+**Навигация:** [README](../README.md) | [Меню](00-INDEX.md) | [← Назад](01-ORCHESTRATOR-CHOICE.md) | [Далее →](03-DEPLOYMENT-ARCHITECTURE.md)
 
 ---
 
@@ -134,19 +134,22 @@ flowchart LR
 
 ---
 
-## Вариант C: Общий (оркестратор-агностик)
+## Вариант C: Sidekiq MVP → апгрейд до Temporal (выбрано для SM Core)
 
-| Компонент | Технология |
-|-----------|------------|
-| **Оркестратор** | Не выбран (Cron + Sidekiq как минимум) |
-| **ЯП / фреймворк** | Ruby 4, Rails 8 |
-| **Workers** | Sidekiq workers |
-| **Краулеры** | Локальные гемы |
-| **Transform** | Локальные шаги + внешние ML (API) |
-| **Очереди / хранилище** | Redis, PostgreSQL |
-| **Observability** | OpenTelemetry, Grafana, NewRelic |
+| Этап | Оркестратор | Компоненты |
+|------|-------------|------------|
+| **MVP** | Cron + Sidekiq | Redis, PostgreSQL, looky-gem-insteon. Одна джоба = один запрос. |
+| **Позже** | Temporal standalone | + Temporal Server, Worker. Job → Activity, цепочка → Workflow. |
 
-**Оркестратор во главе:** нет. Cron создаёт job'ы; Sidekiq выполняет; sync_jobs/sync_tasks хранят состояние. Подходит для MVP до выбора оркестратора.
+**Стратегия:** не старт с нуля с оркестратором, а апгрейд. Сервисы (ProfileService, FollowingsService) не меняются — вызываются из Job, затем из Activity.
+
+| Критерий | Апгрейд (Sidekiq → Temporal) | Temporal с нуля |
+|----------|-----------------------------|-----------------|
+| Время до первого синка | Дни | Недели |
+| Инфраструктура на старте | Redis | Temporal + БД |
+| Рефакторинг при переходе | Умеренный (оркестрация) | — |
+
+См. [08-IMPLEMENTATION-ROADMAP](08-IMPLEMENTATION-ROADMAP.md), раздел 14.
 
 ---
 
