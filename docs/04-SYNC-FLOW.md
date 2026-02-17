@@ -15,7 +15,7 @@ Extract (дорого) → Transform (полный) → Load.
 Под-ETL на entity (пример Instagram, список будет расти):
 
 - `sync_profile`
-- `sync_followers` / `sync_following`
+- `sync_subscriptions` (followers/following)
 - `sync_posts` — постранично (напр. 12 постов на страницу, курсорная пагинация)
 - `sync_comments` — постранично **для каждого поста**
 - `sync_highlights` / `sync_stories`
@@ -129,12 +129,6 @@ flowchart LR
 
 ### Общий
 
-- Cron создаёт sync_job
+- Cron ставит джобу; джоба создаёт JobCall
 - Sidekiq выполняет шаги
-- sync_jobs.cursor, sync_tasks — для докачки и рестарта
-
----
-
-## Таблицы sync_jobs, sync_tasks
-
-См. [05-DATA-CONTRACTS](05-DATA-CONTRACTS.md).
+- ServiceCall.cursor, JobCall/ServiceCall — для докачки и рестарта

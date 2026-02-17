@@ -75,7 +75,7 @@
 | **NewRelic** | APM, трейсинг | Если уже в стеке |
 | **lakeFS** | Версионирование данных в DWH | При необходимости «поворота» на другую версию данных; выглядит избыточным на старте, но полезно при росте |
 | **Redis** | Очереди, кэш, locks | Sidekiq, Temporal (опционально) |
-| **PostgreSQL** | Данные, sync_jobs, sync_tasks | Хранение состояния и результатов |
+| **PostgreSQL** | Данные, job_calls, service_calls | Хранение состояния и результатов |
 | **Kiba Common** | CSV, SQL sources/destinations | Расширение Kiba OSS |
 | **Sidekiq Pro Batches** | DAG поверх Sidekiq, callbacks | Если уже есть Sidekiq Pro — альтернатива Sidekiq Flow |
 

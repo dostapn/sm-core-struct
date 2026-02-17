@@ -47,7 +47,7 @@ cd <PROJECT_NAME>
 **Тесты:**
 - `rspec-rails`, `factory_bot_rails`, `faker`
 - `test-prof` — let_it_be для оптимизации спек
-- `database_cleaner-active_record`, `webmock`, `fakeredis`
+- `webmock`, `fakeredis`
 - `simplecov` — покрытие
 
 **Качество:**
@@ -71,11 +71,11 @@ rails g rspec:install
 ```
 
 **Спеки — структура:**
-- `spec/operations/`, `spec/models/`, `spec/jobs/`, `spec/services/` (зеркало app, напр. `spec/services/instagram/profile/followings_service_spec.rb`)
+- `spec/operations/`, `spec/models/`, `spec/jobs/`, `spec/services/` (зеркало app, напр. `spec/services/instagram/social_profile/subscriptions_service_spec.rb`)
 - Shared contexts, factories
 
 **rails_helper.rb / spec_helper.rb:**
-- Загрузка env, WebMock, DatabaseCleaner
+- Загрузка env, WebMock
 - Fakeredis для Sidekiq/Redis
 - SimpleCov, Annotaterb, Bullet (в dev/test)
 - FactoryBot
@@ -121,42 +121,64 @@ rails db:create
 
 ## 5. Модели и миграции
 
-### 5.1 Profile (блогер)
-```ruby
-# profiles
-#   id (bigint), instagram_id (string, unique, not null), username, full_name, bio, avatar_url,
-#   follower_count, following_count, post_count (integer, default 0),
-#   is_private, is_verified (boolean, default false),
-#   last_synced_at (datetime), created_at, updated_at
-```
-Индекс: `unique index on instagram_id`.
+Схема с заделом на мультиплатформу: `platform` + `ext_id` во всех сущностях.
 
-### 5.2 Following (подписка блогера)
+### 5.1 SocialProfile (блогер / аккаунт в соцсети)
 ```ruby
-# followings
-#   id, profile_id (FK -> profiles), target_instagram_id, target_username, target_full_name,
+# social_profiles
+#   id, platform (string, not null), ext_id (string, not null), username, full_name, bio, avatar, url
+#   followers_count, follows_count, posts_count (integer, default 0), engagement_rate (float)
+#   last_synced_at, raw_data (jsonb), created_at, updated_at
+#   unique [platform, ext_id]
+```
+`raw_data` — сырой payload из API (отладка, миграции). Метрики можно вынести в jsonb (StoreModel) при росте.
+
+### 5.2 Follower (подписчик / пользователь в соцсети)
+```ruby
+# followers
+#   id, platform (string, not null), ext_id (string), username, full_name, avatar, raw_data (jsonb)
 #   created_at, updated_at
-#   unique [profile_id, target_instagram_id]
+#   unique [platform, ext_id]
 ```
 
-### 5.3 SyncRequest (состояние одного запроса к API)
-Один запрос к Insteon = одна запись. Атомарность.
+### 5.3 Subscription (подписка: SocialProfile ← Follower)
+```ruby
+# subscriptions
+#   id, social_profile_id (FK), follower_id (FK), active (boolean, default true)
+#   followed_at, unfollowed_at, created_at, updated_at
+#   unique [social_profile_id, follower_id]
+```
+Temporal-контекст: активность, время follow/unfollow.
+
+### 5.4 JobCall (вызов джобы, ETL-run)
+**Один запуск джобы = одна запись.** ETL: extract, load, transform — не только sync. Каждая джоба на каждый запуск создаёт JobCall. Указатель на процесс, повторные запуски без конфликтов.
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | id | bigint | PK |
-| kind | string | `profile`, `followings_page` |
-| profile_id | bigint | FK, nullable для kind=profile |
+| subject_id | bigint | FK, nullable (MVP: social_profile_id; далее — batch, и т.д.) |
+| kind | string | `profile`, `followings`, `posts`, … |
 | status | string | `pending`, `running`, `succeeded`, `failed`, `partial` |
-| cursor | jsonb | `{ end_cursor, api_provider }` |
-| result_summary | jsonb | `{ items_count, has_more }` |
+| started_at, finished_at | datetime | |
+| created_at, updated_at | datetime | |
+
+### 5.5 ServiceCall (вызов сервиса внутри джобы)
+**Один вызов сервиса (API, DB, и т.д.) = одна запись.** Дети JobCall. Подзадача (след. страница, следующий шаг) → ServiceCall с parent_service_call_id.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | bigint | PK |
+| job_call_id | bigint | FK |
+| parent_service_call_id | bigint | FK, nullable — предыдущий этап |
+| kind | string | `profile`, `followings_page`, … |
+| status | string | `pending`, `running`, `succeeded`, `failed`, `partial` |
+| cursor | jsonb | курсоры, токены пагинации |
+| result_summary | jsonb | метаданные результата |
 | error_message | text | при failed |
 | started_at, finished_at | datetime | |
 | created_at, updated_at | datetime | |
 
-Индексы: `(profile_id, kind, status)`, `(status)`.
-
-**Raw JSON не хранить.** Достаточно result_summary + данные в profiles/followings.
+**Логика:** джоба стартует → JobCall. Вызов сервиса → ServiceCall (job_call_id). Подзадача → ServiceCall с parent_service_call_id. Везде status.
 
 ---
 
@@ -171,7 +193,7 @@ rails db:create
 - Multi-stage: builder (bundle install) → base (runtime)
 
 **entrypoints/docker-entrypoint.sh:**
-- `START_MODE=api` → `bin/rails db:migrate` + `bundle exec falcon host` (или puma)
+- `START_MODE=api` → `bin/rails db:migrate` + `bundle exec puma` (Puma — дефолт Rails, стабильнее; Falcon — для I/O-bound при росте)
 - `START_MODE=sidekiq` → `bundle exec sidekiq`
 - `START_MODE=temporal` → (при апгрейде) `bundle exec temporal worker`
 - Иначе → exit 2
@@ -230,38 +252,38 @@ end
 
 ## 9. Синк: сервисы и джобы
 
-**Принцип:** одна джоба = один запрос к Insteon. Состояние в SyncRequest. Методы в сервисах: `sync` (общий) и `sync_page` (частный, атомарный) — разнести на два метода удобнее всего.
+**Принцип:** одна джоба = один запрос к Insteon. **ETL-модель:** JobCall — обёртка над джобой; ServiceCall — вызов сервиса внутри. Джоба → JobCall. Вызов сервиса → ServiceCall (job_call_id). Подзадача → ServiceCall с parent_service_call_id. Методы: `sync` (общий), `sync_page` (атомарный).
 
-**Структура сервисов:** все сущности привязаны к профилю. `ProfileService` — верхний уровень; `Profile::FollowingsService`, позже `Profile::PostsService`, `Profile::ReelsService`, `Profile::HighlightsService` — вложены под профиль.[^1]
+**Структура сервисов:** все сущности привязаны к SocialProfile. `SocialProfileService` — верхний уровень; `SocialProfile::SubscriptionsService`, позже `SocialProfile::PostsService`, `SocialProfile::ReelsService`, `SocialProfile::HighlightsService` — вложены под профиль.[^1]
 
-### 9.1 Instagram::ProfileService (`app/services/instagram/profile_service.rb`)
-- Метод `sync(username:)` или `sync(user_id:)` — один запрос user_info, upsert Profile, SyncRequest
+### 9.1 Instagram::SocialProfileService (`app/services/instagram/social_profile_service.rb`)
+- Метод `sync(username:)` или `sync(user_id:)` — один запрос user_info, upsert SocialProfile, JobCall + ServiceCall
 - Вход: `username` или `user_id`
 - Вызов: `Insteon.user_info(...)`
-- Выход: Profile или ошибка
+- Выход: SocialProfile или ошибка
 
-### 9.2 Instagram::Profile::FollowingsService (`app/services/instagram/profile/followings_service.rb`)
-- Метод `sync_page(profile_id:, end_cursor:, api_provider:)` — одна страница, атомарно
-- Метод `sync(profile_id:)` — общий: триггер полного синка (ставит первую джобу или вызывает sync_page в цикле — по решению)
-- `sync_page`: вызов `Insteon.followings(...)`, upsert Followings, SyncRequest, возврат has_more, end_cursor, api_provider
+### 9.2 Instagram::SocialProfile::SubscriptionsService (`app/services/instagram/social_profile/subscriptions_service.rb`)
+- Метод `sync_page(social_profile_id:, end_cursor:, api_provider:)` — одна страница, атомарно
+- Метод `sync(social_profile_id:)` — общий: триггер полного синка (ставит первую джобу или цикл sync_page)
+- `sync_page`: вызов `Insteon.followings(...)`, upsert Follower + Subscription, ServiceCall (при пагинации — child с parent_service_call_id), возврат has_more, end_cursor, api_provider
 
-### 9.3 Instagram::SyncProfileJob (`app/jobs/instagram/sync_profile_job.rb`)
-- Аргументы: `username` или `profile_id`
-- Создать SyncRequest (pending → running)
-- Вызвать `Instagram::ProfileService.new.sync(...)`
-- При успехе: поставить `Instagram::SyncFollowingsPageJob.perform_async(profile.id, nil, nil)`
+### 9.3 Instagram::SyncSocialAccountJob (`app/jobs/instagram/sync_social_account_job.rb`)
+- Аргументы: `username` или `social_profile_id`
+- Создать JobCall + ServiceCall (pending → running)
+- Вызвать `Instagram::SocialProfileService.new.sync(...)`
+- При успехе: поставить `Instagram::SyncSubscriptionsJob.perform_async(social_profile.id, nil, nil)`
 
-### 9.4 Instagram::SyncFollowingsPageJob (`app/jobs/instagram/sync_followings_page_job.rb`)
-- Аргументы: `profile_id`, `end_cursor`, `api_provider`
-- Вызвать `Instagram::Profile::FollowingsService.new.sync_page(...)`
+### 9.4 Instagram::SyncSubscriptionsJob (`app/jobs/instagram/sync_subscriptions_job.rb`)
+- Аргументы: `social_profile_id`, `end_cursor`, `api_provider`
+- Вызвать `Instagram::SocialProfile::SubscriptionsService.new.sync_page(...)`
 - При `has_more` — поставить себя с новым end_cursor
 
 ### 9.5 Последовательность
-1. Cron → `Instagram::SyncProfileJob.perform_async('username')`
-2. SyncProfileJob → ProfileService.sync → Profile → SyncFollowingsPageJob (cursor: nil)
-3. SyncFollowingsPageJob → FollowingsService.sync_page → при has_more ставит себя
+1. Cron → `Instagram::SyncSocialAccountJob.perform_async('username')`
+2. SyncSocialAccountJob → SocialProfileService.sync → SocialProfile → SyncSubscriptionsJob (cursor: nil)
+3. SyncSubscriptionsJob → SubscriptionsService.sync_page → Follower + Subscription; при has_more ставит себя
 
-[^1]: Профиль — корневая сущность; followings, posts, reels, highlights — дочерние. Вложенность `profile/` отражает принадлежность к профилю и упрощает расширение (posts_service, reels_service и т.д. в том же неймспейсе).
+[^1]: SocialProfile — корневая сущность; subscriptions (followers), posts, reels, highlights — дочерние. Вложенность `social_profile/` отражает принадлежность.
 
 ### 9.6 Диаграмма потока синка
 
@@ -269,25 +291,25 @@ end
 sequenceDiagram
     participant Cron
     participant Sidekiq
-    participant SyncProfileJob
-    participant SyncFollowingsPageJob
+    participant SyncSocialAccountJob
+    participant SyncSubscriptionsJob
     participant Insteon
     participant DB
 
-    Cron->>Sidekiq: SyncProfileJob(username)
-    Sidekiq->>SyncProfileJob: perform
-    SyncProfileJob->>DB: SyncRequest(pending->running)
-    SyncProfileJob->>Insteon: user_info(username)
-    Insteon-->>SyncProfileJob: User
-    SyncProfileJob->>DB: Profile upsert, SyncRequest(succeeded)
-    SyncProfileJob->>Sidekiq: SyncFollowingsPageJob(profile_id, cursor: nil)
+    Cron->>Sidekiq: SyncSocialAccountJob(username)
+    Sidekiq->>SyncSocialAccountJob: perform
+    SyncSocialAccountJob->>DB: JobCall + ServiceCall(pending->running)
+    SyncSocialAccountJob->>Insteon: user_info(username)
+    Insteon-->>SyncSocialAccountJob: User
+    SyncSocialAccountJob->>DB: SocialProfile upsert, JobCall/ServiceCall(succeeded)
+    SyncSocialAccountJob->>Sidekiq: SyncSubscriptionsJob(social_profile_id, cursor: nil)
 
-    Sidekiq->>SyncFollowingsPageJob: perform
-    SyncFollowingsPageJob->>Insteon: followings(user_id, cursor)
-    Insteon-->>SyncFollowingsPageJob: items, end_cursor, has_more
-    SyncFollowingsPageJob->>DB: Following upsert, SyncRequest
+    Sidekiq->>SyncSubscriptionsJob: perform
+    SyncSubscriptionsJob->>Insteon: followings(user_id, cursor)
+    Insteon-->>SyncSubscriptionsJob: items, end_cursor, has_more
+    SyncSubscriptionsJob->>DB: Follower + Subscription upsert, ServiceCall(job_call_id)
     alt has_more
-        SyncFollowingsPageJob->>Sidekiq: SyncFollowingsPageJob(profile_id, end_cursor)
+        SyncSubscriptionsJob->>Sidekiq: SyncSubscriptionsJob(social_profile_id, end_cursor)
     end
 ```
 
@@ -295,9 +317,9 @@ sequenceDiagram
 
 ## 10. Cron
 
-**sidekiq-scheduler** или **whenever**:
-- Периодически: `Instagram::SyncProfileJob.perform_async(username)` для списка блогеров
-- Список: из БД (таблица `sync_schedules` или конфиг) или ENV
+### sidekiq-scheduler
+- Периодически: `Instagram::SyncSocialAccountJob.perform_async(username)` для списка блогеров
+- Список: из БД (таблица `sync_schedules` или конфиг) или ENV - в процессе реализации
 
 ---
 
@@ -305,12 +327,13 @@ sequenceDiagram
 
 ### 11.1 pg_search
 - Gem: `pg_search`
-- `Profile.pg_search_scope :search_by_username_and_name, against: [:username, :full_name]`
+- `SocialProfile.pg_search_scope :search_by_username_and_name, against: [:username, :full_name]`
+- Scope по platform: `instagram` для MVP
 
 ### 11.2 API
-- `GET /api/v1/bloggers?q=...&page=1&per_page=20`
+- `GET /api/v1/bloggers?q=...&page=1&per_page=20&platform=instagram`
 - Controller → Operation в `app/operations/` (референс: looky_service_account_api)
-- Operation: `Profile.search_by_username_and_name(params[:q]).page(...).per(...)`
+- Operation: `SocialProfile.where(platform: 'instagram').search_by_username_and_name(params[:q]).page(...).per(...)`
 - Serializer (Panko или Jbuilder)
 
 ---
@@ -338,8 +361,8 @@ sequenceDiagram
 
 - [ ] Rails API + PostgreSQL + Redis + Sidekiq
 - [ ] Secrets Manager + .env.example
-- [ ] Модели: Profile, Following, SyncRequest
-- [ ] Insteon config + Instagram::ProfileService, Instagram::Profile::FollowingsService + Jobs
+- [ ] Модели: SocialProfile, Follower, Subscription, JobCall, ServiceCall
+- [ ] Insteon config + Instagram::SocialProfileService, Instagram::SocialProfile::SubscriptionsService + Jobs
 - [ ] Cron для списка блогеров
 - [ ] Docker + docker-compose
 - [ ] CI (tests, lint) + CD (build)
@@ -350,19 +373,56 @@ sequenceDiagram
 
 ---
 
+## Дорожная карта: последовательность действий
+
+Пошаговый план от нуля до работающего синка. Выполнять по порядку.
+
+| # | Шаг | Действие | Результат |
+|---|-----|----------|-----------|
+| 1 | Подготовка | Согласовать название SM Core (sm-core) | README, конфиги |
+| 2 | Инициализация | `rails new sm-core --api -d postgresql -T` | Базовая структура app/, config/, db/ |
+| 3 | Gemfile | Добавить rspec, sidekiq, pg, redis, dotenv, rubocop-oneclick, looky-gem-insteon и др. | `bundle install` |
+| 4 | RSpec | `rails g rspec:install`, настроить rails_helper (WebMock, fakeredis, use_transactional_fixtures) | `bundle exec rspec` проходит |
+| 5 | Документация | README, docs/ai-prompt.md, .cursor/rules, .env.example | Правила и setup описаны |
+| 6 | Secrets Manager | Создать config/secrets_manager.rb (DB_*, REDIS_*, ROCKET_API_KEY, RAPID_API_KEY) | `SECRETS_MANAGER` доступен |
+| 7 | database.yml | Подключить SECRETS_MANAGER, БД sm_core_development/test/production | `rails db:create` |
+| 8 | Миграция SocialProfile | platform, ext_id, username, full_name, bio, avatar, url, followers_count, follows_count, posts_count, engagement_rate, last_synced_at, raw_data | `rails db:migrate` |
+| 9 | Миграция Follower | platform, ext_id, username, full_name, avatar, raw_data | Индекс (platform, ext_id) UNIQUE |
+| 10 | Миграция Subscription | social_profile_id, follower_id, active, followed_at, unfollowed_at | Индекс (social_profile_id, follower_id) UNIQUE |
+| 11 | Миграция JobCall | subject_id, kind, status, started_at, finished_at | Вызов джобы (ETL-run) |
+| 12 | Миграция ServiceCall | job_call_id, parent_service_call_id, kind, status, cursor, result_summary, error_message | Вызов сервиса, цепочка parent |
+| 13 | Модели | SocialProfile, Follower, Subscription, JobCall, ServiceCall + ассоциации | `has_many` / `belongs_to` |
+| 14 | Спеки моделей | spec/models/social_profile_spec.rb и др. | Валидации, ассоциации покрыты |
+| 15 | Insteon | config/initializers/insteon.rb, ROCKET_API_KEY, RAPID_API_KEY | `Insteon.user_info`, `Insteon.followings` работают |
+| 16 | Спеки Insteon | Мок или VCR в rails_helper | Интеграционные тесты |
+| 17 | SocialProfileService | Instagram::SocialProfileService#sync — user_info → SocialProfile upsert | Сервис + спек |
+| 18 | SubscriptionsService | Instagram::SocialProfile::SubscriptionsService#sync_page — followings → Follower + Subscription upsert | Сервис + спек |
+| 19 | SyncSocialAccountJob | Создать JobCall + ServiceCall, вызвать SocialProfileService, поставить SyncSubscriptionsJob | Джоба + спек |
+| 20 | SyncSubscriptionsJob | Вызвать SubscriptionsService#sync_page, при has_more — perform_async | Джоба + спек |
+| 21 | Cron | sidekiq-scheduler: периодически SyncSocialAccountJob для списка username | Синк запускается по расписанию |
+| 22 | Docker | Dockerfile, entrypoints/docker-entrypoint.sh (api, sidekiq) | `docker-compose up` |
+| 23 | CI/CD | ci-tests.yml, cd-build.yml | Push → тесты, build образа |
+| 24 | PGSearch | SocialProfile.pg_search_scope | Поиск по username, full_name |
+| 25 | API bloggers | GET /api/v1/bloggers?q=...&platform=instagram | Controller → Operation → Serializer |
+| 26 | Деплой | Healthcheck, образ в Yandex CR, деплой на stage | Контейнер поднят, Sidekiq обрабатывает джобы |
+
+---
+
 ## Файлы для создания (сводка)
 
 | Путь | Описание |
 |------|-----------|
 | `config/secrets_manager.rb` | Централизованные секреты |
 | `config/initializers/insteon.rb` | Конфиг Insteon |
-| `app/models/profile.rb` | Модель блогера |
-| `app/models/following.rb` | Модель подписки |
-| `app/models/sync_request.rb` | Состояние запроса |
-| `app/services/instagram/profile_service.rb` | Сервис синка профиля |
-| `app/services/instagram/profile/followings_service.rb` | Сервис followings (sync, sync_page) |
-| `app/jobs/instagram/sync_profile_job.rb` | Джоба синка профиля |
-| `app/jobs/instagram/sync_followings_page_job.rb` | Джоба страницы followings |
+| `app/models/social_profile.rb` | Модель блогера (platform, ext_id) |
+| `app/models/follower.rb` | Модель подписчика |
+| `app/models/subscription.rb` | Связь SocialProfile ↔ Follower |
+| `app/models/job_call.rb` | Вызов джобы (ETL-run) |
+| `app/models/service_call.rb` | Вызов сервиса внутри джобы (job_call_id, parent_service_call_id) |
+| `app/services/instagram/social_profile_service.rb` | Сервис синка SocialProfile |
+| `app/services/instagram/social_profile/subscriptions_service.rb` | Сервис Subscriptions (sync, sync_page) |
+| `app/jobs/instagram/sync_social_account_job.rb` | Джоба синка аккаунта (профиль + followings) |
+| `app/jobs/instagram/sync_subscriptions_job.rb` | Джоба страницы subscriptions (followings) |
 | `app/controllers/api/v1/bloggers_controller.rb` | API поиска блогеров |
 | `Dockerfile` | Образ приложения |
 | `entrypoints/docker-entrypoint.sh` | Точка входа |
@@ -384,7 +444,7 @@ sequenceDiagram
 3. **Рефакторинг джоб в Activities:** Job → Activity (вызывает тот же сервис).
 4. **Workflow:** цепочка perform_async → Workflow с циклом Activity.
 5. **Триггер:** Cron/Sidekiq → `Temporal::Client.start_workflow(...)`.
-6. **SyncRequest:** без изменений — источник истины.
+6. **JobCall + ServiceCall:** без изменений — источник истины (ETL-run, цепочка вызовов).
 
 ### Сравнение: апгрейд vs Temporal с нуля
 

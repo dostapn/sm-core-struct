@@ -127,10 +127,10 @@ flowchart LR
 | **Краулеры** | Локальные гемы (Instagram, YouTube, TikTok) |
 | **Transform** | Rails + внешние ML/ImageRecognition (API, polling) |
 | **Polling** | Cron или Sidekiq scheduled job — опрос результатов (1 мин — несколько дней) |
-| **Очереди / хранилище** | Redis (Sidekiq), PostgreSQL (данные, sync_jobs) |
+| **Очереди / хранилище** | Redis (Sidekiq), PostgreSQL (данные, job_calls, service_calls) |
 | **Observability** | OpenTelemetry, Grafana, NewRelic |
 
-**Оркестратор во главе:** Sidekiq Flow — DAG. Checkpoints и resume — вручную (sync_jobs, cursor).
+**Оркестратор во главе:** Sidekiq Flow — DAG. Checkpoints и resume — вручную (JobCall, ServiceCall, cursor).
 
 ---
 
@@ -141,7 +141,7 @@ flowchart LR
 | **MVP** | Cron + Sidekiq | Redis, PostgreSQL, looky-gem-insteon. Одна джоба = один запрос. |
 | **Позже** | Temporal standalone | + Temporal Server, Worker. Job → Activity, цепочка → Workflow. |
 
-**Стратегия:** не старт с нуля с оркестратором, а апгрейд. Сервисы (ProfileService, FollowingsService) не меняются — вызываются из Job, затем из Activity.
+**Стратегия:** не старт с нуля с оркестратором, а апгрейд. Сервисы (SocialProfileService, SubscriptionsService) не меняются — вызываются из Job, затем из Activity.
 
 | Критерий | Апгрейд (Sidekiq → Temporal) | Temporal с нуля |
 |----------|-----------------------------|-----------------|

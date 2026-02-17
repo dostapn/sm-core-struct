@@ -25,9 +25,9 @@
 app/services/
   application_service.rb
   instagram/
-    profile_service.rb              # Instagram::ProfileService
-    profile/
-      followings_service.rb         # Instagram::Profile::FollowingsService
+    social_profile_service.rb       # Instagram::SocialProfileService
+    social_profile/
+      subscriptions_service.rb     # Instagram::SocialProfile::SubscriptionsService
       # posts_service.rb            # позже
       # reels_service.rb            # позже
       # highlights_service.rb       # позже
@@ -44,9 +44,9 @@ app/services/
 - **`sync`** — общий: полный синк (триггер цепочки джоб или цикл)
 - **`sync_page`** — частный: одна страница, один запрос к API (атомарно)
 
-Пример `Instagram::Profile::FollowingsService`:
-- `sync_page(profile_id:, end_cursor:, api_provider:)` — одна страница followings
-- `sync(profile_id:)` — запуск полного синка (ставит первую джобу или цикл sync_page)
+Пример `Instagram::SocialProfile::SubscriptionsService`:
+- `sync(social_profile_id:)` — запуск полного синка (ставит первую джобу или цикл sync_page)
+- `sync_page(social_profile_id:, end_cursor:, api_provider:)` — одна страница followings
 
 ---
 
@@ -54,16 +54,18 @@ app/services/
 
 Неймспейс `Instagram::`:
 
-- `app/jobs/instagram/sync_profile_job.rb` → `Instagram::SyncProfileJob`
-- `app/jobs/instagram/sync_followings_page_job.rb` → `Instagram::SyncFollowingsPageJob`
+- `app/jobs/instagram/sync_social_account_job.rb` → `Instagram::SyncSocialAccountJob`
+- `app/jobs/instagram/sync_subscriptions_job.rb` → `Instagram::SyncSubscriptionsJob`
 
 Джоба вызывает метод сервиса (`sync` или `sync_page`).
+
+**ETL-модель:** джоба при старте создаёт JobCall; каждый вызов сервиса (API, DB) создаёт ServiceCall (job_call_id). Подзадача (след. страница) → ServiceCall с parent_service_call_id.
 
 ---
 
 ## 5. Спеки
 
-Зеркало app: `spec/services/instagram/`, `spec/services/instagram/profile/`, `spec/jobs/instagram/`, `spec/operations/`.
+Зеркало app: `spec/services/instagram/`, `spec/services/instagram/social_profile/`, `spec/jobs/instagram/`, `spec/operations/`.
 
 ---
 

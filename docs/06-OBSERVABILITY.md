@@ -21,7 +21,7 @@
 JSON с полями:
 
 - `workflow_id`
-- `run_id`
+- `job_call_id` (JobCall.id для трейсинга)
 - `step`
 - `status`
 - `error_type`

@@ -4,7 +4,7 @@
 
 ---
 
-Форматы данных, API, схема sync_jobs/sync_tasks.
+Форматы данных, API, схема JobCall/ServiceCall.
 
 ---
 
@@ -15,9 +15,11 @@
 
 ---
 
-## Выходные данные
+## Выходные данные (SM Core)
 
-- **Профили** — атрибуты профиля (id, username, bio, followers_count, …)
+- **SocialProfile** — platform, ext_id, username, full_name, bio, avatar, url, followers_count, follows_count, posts_count, engagement_rate, raw_data
+- **Follower** — platform, ext_id, username, full_name, avatar, raw_data
+- **Subscription** — social_profile_id, follower_id, active, followed_at, unfollowed_at
 - **Посты** — id, profile_id, caption (одна на пост), media (фото, видео — много элементов), created_at, …
 - **Лайки, комменты** — id, post_id, author_id, content, created_at, …
 - **Метрики** — подписчики, просмотры, engagement и т.п.
@@ -29,7 +31,7 @@
 ## API бэкенда
 
 - **REST** или **GraphQL** — по выбору
-- Endpoints: запуск синка, статус job, результаты
+- MVP: `GET /api/v1/bloggers` (поиск). Запуск синка, статус — в будущем.
 
 ---
 
@@ -41,35 +43,33 @@
 
 ---
 
-## Модель sync_jobs
+## Модель JobCall (вызов джобы)
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | id | bigint | PK |
-| network | string | instagram, youtube, tiktok |
-| entity_id | string | ID профиля/аккаунта в соцсети |
-| cursor | jsonb | since_id, until_id, page_token и т.п. |
-| status | enum | статус выполнения¹ |
-| error_type | string | тип ошибки при failed |
-| error_message | text | сообщение об ошибке |
-| previous_job_id | bigint | FK на предыдущий job при рестарте/докачке |
-| started_at | timestamp | |
-| finished_at | timestamp | |
+| subject_id | bigint | FK, nullable (MVP: social_profile_id) |
+| kind | string | profile, followings, posts, … |
+| status | string | статус выполнения¹ |
+| started_at, finished_at | timestamp | |
+| created_at, updated_at | timestamp | |
 
 ---
 
-## Модель sync_tasks (опционально, гранулярно)
+## Модель ServiceCall (вызов сервиса внутри джобы)
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | id | bigint | PK |
-| job_id | bigint | FK → sync_jobs |
-| kind | enum | profile, posts, comments, likes |
-| external_id | string | post_id, comment_id и т.п. |
-| status | enum | статус выполнения¹ |
-| attempts | int | количество попыток |
-| last_error | text | |
-| last_synced_at | timestamp | |
+| job_call_id | bigint | FK |
+| parent_service_call_id | bigint | FK, nullable — предыдущий этап (пагинация) |
+| kind | string | profile, followings_page, … |
+| status | string | статус выполнения¹ |
+| cursor | jsonb | курсоры, токены пагинации |
+| result_summary | jsonb | метаданные результата |
+| error_message | text | при failed |
+| started_at, finished_at | timestamp | |
+| created_at, updated_at | timestamp | |
 
 ---
 
@@ -82,4 +82,4 @@
 | **succeeded** | Успешно завершён |
 | **failed** | Ошибка |
 | **partial** | Частичный успех (часть данных получена, можно докачать) |
-| **skipped** | Пропущено (напр. уже актуально; в основном для sync_tasks) |
+| **skipped** | Пропущено (напр. уже актуально) |

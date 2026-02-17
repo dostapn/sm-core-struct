@@ -79,7 +79,7 @@ flowchart TB
 | **Rails API** | Точка входа, приём запросов на синк |
 | **Temporal Server** | Оркестрация workflow (при варианте A) |
 | **Temporal Workers** | Выполнение Activity (Extract, Transform, Load) |
-| **PostgreSQL** | Данные, sync_jobs, sync_tasks | 
+| **PostgreSQL** | Данные, job_calls, service_calls | 
 | **Redis** | Sidekiq / Temporal (опционально) |
 | **Crawler Gems** | Extract из Instagram, YouTube, TikTok |
 | **Transform (локально)** | Валидация, нормализация, приведение типов |
