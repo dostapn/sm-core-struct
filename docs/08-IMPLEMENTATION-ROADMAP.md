@@ -363,10 +363,10 @@ sequenceDiagram
 
 - [x] 1. **Подготовка** — Согласовать название SM Core (sm-core) → README, конфиги
 - [x] 2. **Инициализация** — `rails new sm-core --api -d postgresql -T` → Базовая структура app/, config/, db/
-- [ ] 3. **Gemfile** — Добавить rspec, sidekiq, pg, redis, dotenv, rubocop-oneclick, looky-gem-insteon и др. → `bundle install`
-- [ ] 4. **RSpec** — `rails g rspec:install`, настроить rails_helper (WebMock, fakeredis, use_transactional_fixtures) → `bundle exec rspec` проходит
-- [ ] 5. **Документация** — README, docs/ai-prompt.md, .cursor/rules, .env.example → Правила и setup описаны
-- [ ] 6. **Secrets Manager** — Создать config/secrets_manager.rb (DB_*, REDIS_*, ROCKET_API_KEY, RAPID_API_KEY) → `SECRETS_MANAGER` доступен
+- [x] 3. **Gemfile** — Добавить rspec, sidekiq, pg, redis, dotenv, rubocop-oneclick, looky-gem-insteon и др. → `bundle install`
+- [x] 4. **RSpec** — `rails g rspec:install`, настроить rails_helper (WebMock, fakeredis, use_transactional_fixtures) → `bundle exec rspec` проходит
+- [x] 5. **Документация** — README, docs/ai-prompt.md, .cursor/rules, .env.example → Правила и setup описаны
+- [x] 6. **Secrets Manager** — Создать config/secrets_manager.rb (DB_*, REDIS_*, ROCKET_API_KEY, RAPID_API_KEY) → `SECRETS_MANAGER` доступен
 - [ ] 7. **database.yml** — Подключить SECRETS_MANAGER, БД sm_core_development/test/production → `rails db:create`
 - [ ] 8. **Миграция SocialProfile** — platform, ext_id, username, full_name, bio, avatar, url, followers_count, follows_count, posts_count, engagement_rate, last_synced_at, raw_data → `rails db:migrate`
 - [ ] 9. **Миграция Follower** — platform, ext_id, username, full_name, avatar, raw_data → Индекс (platform, ext_id) UNIQUE
