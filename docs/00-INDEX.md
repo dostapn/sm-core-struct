@@ -25,7 +25,7 @@
 
 ## План создания сервиса
 
-1. **Название:** SM Core (sm-core) — Social Monitoring Core.
+1. **Название:** SM Core (sm_core) — Social Monitoring Core.
 2. **Оркестратор:** MVP на Sidekiq + cron → апгрейд до Temporal (см. 02, 08).
 3. **Развернуть инфраструктуру** — Docker, Yandex Cloud, Kubernetes.
 4. **Реализовать Extract** — looky-gem-insteon (Instagram), атомарные джобы.

@@ -1,4 +1,4 @@
-# SM Core (sm-core)
+# SM Core (sm_core)
 
 Social Monitoring Core — архитектура и база знаний ETL-сервиса синхронизации данных из соцсетей.
 

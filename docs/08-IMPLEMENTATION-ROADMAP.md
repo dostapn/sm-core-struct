@@ -19,13 +19,13 @@
 
 ## 0. Подготовка (до кода)
 
-**Название:** SM Core (sm-core) — Social Monitoring Core. Зафиксировать в README и конфигах.
+**Название:** SM Core (sm_core) — Social Monitoring Core. Зафиксировать в README и конфигах.
 
 ---
 
 ## 1. Инициализация приложения
 
-**Где:** новая директория (напр. sm-core).
+**Где:** новая директория (напр. sm_core).
 
 ```bash
 rails new <PROJECT_NAME> --api -d postgresql -T
@@ -150,8 +150,8 @@ rails db:create
 ```
 Temporal-контекст: активность, время follow/unfollow.
 
-### 5.4 JobCall (вызов джобы, ETL-run)
-**Один запуск джобы = одна запись.** ETL: extract, load, transform — не только sync. Каждая джоба на каждый запуск создаёт JobCall. Указатель на процесс, повторные запуски без конфликтов.
+### 5.4 JobCall (вызов джобы, ETL-run) — *после деплоя MVP*
+**Один запуск джобы = одна запись.** ETL: extract, load, transform — не только sync. Каждая джоба на каждый запуск создаёт JobCall. Указатель на процесс, повторные запуски без конфликтов. **Для MVP не требуется** — добавляется после первого деплоя.
 
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -162,8 +162,8 @@ Temporal-контекст: активность, время follow/unfollow.
 | started_at, finished_at | datetime | |
 | created_at, updated_at | datetime | |
 
-### 5.5 ServiceCall (вызов сервиса внутри джобы)
-**Один вызов сервиса (API, DB, и т.д.) = одна запись.** Дети JobCall. Подзадача (след. страница, следующий шаг) → ServiceCall с parent_service_call_id.
+### 5.5 ServiceCall (вызов сервиса внутри джобы) — *после деплоя MVP*
+**Один вызов сервиса (API, DB, и т.д.) = одна запись.** Дети JobCall. Подзадача (след. страница, следующий шаг) → ServiceCall с parent_service_call_id. **Для MVP не требуется** — добавляется после первого деплоя.
 
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -186,7 +186,7 @@ Temporal-контекст: активность, время follow/unfollow.
 
 **Референс:** looky_service_account_api/Dockerfile, looky_reaper_service/Dockerfile.
 
-**Упрощения для sm-core:**
+**Упрощения для sm_core:**
 - Ruby 4-slim
 - Без Kafka, ffmpeg, librdkafka
 - Оставить: libpq5, postgresql-client, tzdata, curl, libjemalloc2
@@ -223,7 +223,7 @@ Temporal-контекст: активность, время follow/unfollow.
 - RuboCop (rubocop-oneclick), bundler-audit, brakeman (continue-on-error для security)
 - Env vars для тестов: DB_*, REDIS_*, ROCKET_API_KEY, RAPID_API_KEY, NEW_RELIC_LICENSE_KEY (заглушки; NewRelic в test отключить через env)
 
-**cd-build.yml:** build + push в Yandex CR. `# CHANGED: yc_cr_repository -> sm-core`
+**cd-build.yml:** build + push в Yandex CR.
 
 **cd-deploy-stage.yml** / **cd-deploy-prod.yml** — аналогично, с пометками замены registry/repository.
 
@@ -252,7 +252,7 @@ end
 
 ## 9. Синк: сервисы и джобы
 
-**Принцип:** одна джоба = один запрос к Insteon. **ETL-модель:** JobCall — обёртка над джобой; ServiceCall — вызов сервиса внутри. Джоба → JobCall. Вызов сервиса → ServiceCall (job_call_id). Подзадача → ServiceCall с parent_service_call_id. Методы: `sync` (общий), `sync_page` (атомарный).
+**Принцип:** одна джоба = один запрос к Insteon. **MVP:** без JobCall/ServiceCall — джобы вызывают сервисы напрямую, upsert SocialProfile/Follower/Subscription. **После деплоя:** JobCall — обёртка над джобой; ServiceCall — вызов сервиса внутри. Методы: `sync` (общий), `sync_page` (атомарный).
 
 **Структура сервисов:** все сущности привязаны к SocialProfile. `SocialProfileService` — верхний уровень; `SocialProfile::SubscriptionsService`, позже `SocialProfile::PostsService`, `SocialProfile::ReelsService`, `SocialProfile::HighlightsService` — вложены под профиль.[^1]
 
@@ -269,13 +269,14 @@ end
 
 ### 9.3 Instagram::SyncSocialAccountJob (`app/jobs/instagram/sync_social_account_job.rb`)
 - Аргументы: `username` или `social_profile_id`
-- Создать JobCall + ServiceCall (pending → running)
-- Вызвать `Instagram::SocialProfileService.new.sync(...)`
+- **MVP:** вызвать `Instagram::SocialProfileService.new.sync(...)` напрямую
+- **После деплоя:** создать JobCall + ServiceCall (pending → running), обернуть вызов
 - При успехе: поставить `Instagram::SyncSubscriptionsJob.perform_async(social_profile.id, nil, nil)`
 
 ### 9.4 Instagram::SyncSubscriptionsJob (`app/jobs/instagram/sync_subscriptions_job.rb`)
 - Аргументы: `social_profile_id`, `end_cursor`, `api_provider`
 - Вызвать `Instagram::SocialProfile::SubscriptionsService.new.sync_page(...)`
+- **После деплоя:** ServiceCall (job_call_id) при пагинации
 - При `has_more` — поставить себя с новым end_cursor
 
 ### 9.5 Последовательность
@@ -298,16 +299,16 @@ sequenceDiagram
 
     Cron->>Sidekiq: SyncSocialAccountJob(username)
     Sidekiq->>SyncSocialAccountJob: perform
-    SyncSocialAccountJob->>DB: JobCall + ServiceCall(pending->running)
+    Note over SyncSocialAccountJob: MVP: без JobCall/ServiceCall
     SyncSocialAccountJob->>Insteon: user_info(username)
     Insteon-->>SyncSocialAccountJob: User
-    SyncSocialAccountJob->>DB: SocialProfile upsert, JobCall/ServiceCall(succeeded)
+    SyncSocialAccountJob->>DB: SocialProfile upsert
     SyncSocialAccountJob->>Sidekiq: SyncSubscriptionsJob(social_profile_id, cursor: nil)
 
     Sidekiq->>SyncSubscriptionsJob: perform
     SyncSubscriptionsJob->>Insteon: followings(user_id, cursor)
     Insteon-->>SyncSubscriptionsJob: items, end_cursor, has_more
-    SyncSubscriptionsJob->>DB: Follower + Subscription upsert, ServiceCall(job_call_id)
+    SyncSubscriptionsJob->>DB: Follower + Subscription upsert
     alt has_more
         SyncSubscriptionsJob->>Sidekiq: SyncSubscriptionsJob(social_profile_id, end_cursor)
     end
@@ -361,8 +362,8 @@ sequenceDiagram
 
 Пошаговый план от нуля до работающего синка. Выполнять по порядку.
 
-- [x] 1. **Подготовка** — Согласовать название SM Core (sm-core) → README, конфиги
-- [x] 2. **Инициализация** — `rails new sm-core --api -d postgresql -T` → Базовая структура app/, config/, db/
+- [x] 1. **Подготовка** — Согласовать название SM Core (sm_core) → README, конфиги
+- [x] 2. **Инициализация** — `rails new sm_core --api -d postgresql -T` → Базовая структура app/, config/, db/
 - [x] 3. **Gemfile** — Добавить rspec, sidekiq, pg, redis, dotenv, rubocop-oneclick, looky-gem-insteon и др. → `bundle install`
 - [x] 4. **RSpec** — `rails g rspec:install`, настроить rails_helper (WebMock, fakeredis, use_transactional_fixtures) → `bundle exec rspec` проходит
 - [x] 5. **Документация** — README, docs/ai-prompt.md, .cursor/rules, .env.example → Правила и setup описаны
@@ -371,22 +372,31 @@ sequenceDiagram
 - [ ] 8. **Миграция SocialProfile** — platform, ext_id, username, full_name, bio, avatar, url, followers_count, follows_count, posts_count, engagement_rate, last_synced_at, raw_data → `rails db:migrate`
 - [ ] 9. **Миграция Follower** — platform, ext_id, username, full_name, avatar, raw_data → Индекс (platform, ext_id) UNIQUE
 - [ ] 10. **Миграция Subscription** — social_profile_id, follower_id, active, followed_at, unfollowed_at → Индекс (social_profile_id, follower_id) UNIQUE
-- [ ] 11. **Миграция JobCall** — subject_id, kind, status, started_at, finished_at → Вызов джобы (ETL-run)
-- [ ] 12. **Миграция ServiceCall** — job_call_id, parent_service_call_id, kind, status, cursor, result_summary, error_message → Вызов сервиса, цепочка parent
-- [ ] 13. **Модели** — SocialProfile, Follower, Subscription, JobCall, ServiceCall + ассоциации → `has_many` / `belongs_to`
-- [ ] 14. **Спеки моделей** — spec/models/social_profile_spec.rb и др. → Валидации, ассоциации покрыты
-- [ ] 15. **Insteon** — config/initializers/insteon.rb, ROCKET_API_KEY, RAPID_API_KEY → `Insteon.user_info`, `Insteon.followings` работают
-- [ ] 16. **Спеки Insteon** — Мок или VCR в rails_helper → Интеграционные тесты
-- [ ] 17. **SocialProfileService** — Instagram::SocialProfileService#sync — user_info → SocialProfile upsert → Сервис + спек
-- [ ] 18. **SubscriptionsService** — Instagram::SocialProfile::SubscriptionsService#sync_page — followings → Follower + Subscription upsert → Сервис + спек
-- [ ] 19. **SyncSocialAccountJob** — Создать JobCall + ServiceCall, вызвать SocialProfileService, поставить SyncSubscriptionsJob → Джоба + спек
-- [ ] 20. **SyncSubscriptionsJob** — Вызвать SubscriptionsService#sync_page, при has_more — perform_async → Джоба + спек
-- [ ] 21. **Cron** — sidekiq-scheduler: периодически SyncSocialAccountJob для списка username → Синк запускается по расписанию
-- [ ] 22. **Docker** — Dockerfile, entrypoints/docker-entrypoint.sh (api, sidekiq) → `docker-compose up`
-- [ ] 23. **CI/CD** — ci-tests.yml, cd-build.yml → Push → тесты, build образа
-- [ ] 24. **PGSearch** — SocialProfile.pg_search_scope → Поиск по username, full_name
-- [ ] 25. **API bloggers** — GET /api/v1/bloggers?q=...&platform=instagram → Controller → Operation → Serializer
-- [ ] 26. **Деплой** — Healthcheck, образ в Yandex CR, деплой на stage → Контейнер поднят, Sidekiq обрабатывает джобы
+- [ ] 11. **Модели** — SocialProfile, Follower, Subscription + ассоциации → `has_many` / `belongs_to`
+- [ ] 12. **Спеки моделей** — spec/models/social_profile_spec.rb и др. → Валидации, ассоциации покрыты
+- [ ] 13. **Insteon** — config/initializers/insteon.rb, ROCKET_API_KEY, RAPID_API_KEY → `Insteon.user_info`, `Insteon.followings` работают
+- [ ] 14. **Спеки Insteon** — Мок или VCR в rails_helper → Интеграционные тесты
+- [ ] 15. **SocialProfileService** — Instagram::SocialProfileService#sync — user_info → SocialProfile upsert → Сервис + спек
+- [ ] 16. **SubscriptionsService** — Instagram::SocialProfile::SubscriptionsService#sync_page — followings → Follower + Subscription upsert → Сервис + спек
+- [ ] 17. **SyncSocialAccountJob** — Вызвать SocialProfileService, поставить SyncSubscriptionsJob → Джоба + спек
+- [ ] 18. **SyncSubscriptionsJob** — Вызвать SubscriptionsService#sync_page, при has_more — perform_async → Джоба + спек
+- [ ] 19. **Cron** — sidekiq-scheduler: периодически SyncSocialAccountJob для списка username → Синк запускается по расписанию
+- [ ] 20. **Docker** — Dockerfile, entrypoints/docker-entrypoint.sh (api, sidekiq) → `docker-compose up`
+- [ ] 21. **CI/CD** — ci-tests.yml, cd-build.yml → Push → тесты, build образа
+- [ ] 22. **PGSearch** — SocialProfile.pg_search_scope → Поиск по username, full_name
+- [ ] 23. **API bloggers** — GET /api/v1/bloggers?q=...&platform=instagram → Controller → Operation → Serializer
+- [ ] 24. **Деплой** — Healthcheck, образ в Yandex CR, деплой на stage → Контейнер поднят, Sidekiq обрабатывает джобы
+
+---
+
+## После деплоя MVP: JobCall и ServiceCall
+
+Наблюдаемость ETL-запусков. Добавляется когда нужна трассировка джоб и вызовов сервисов.
+
+- [ ] **Миграция JobCall** — subject_id, kind, status, started_at, finished_at → Вызов джобы (ETL-run)
+- [ ] **Миграция ServiceCall** — job_call_id, parent_service_call_id, kind, status, cursor, result_summary, error_message → Вызов сервиса, цепочка parent
+- [ ] **Модели** — JobCall, ServiceCall + ассоциации
+- [ ] **Рефакторинг джоб** — SyncSocialAccountJob, SyncSubscriptionsJob: обернуть вызовы в JobCall + ServiceCall
 
 ---
 
@@ -399,8 +409,8 @@ sequenceDiagram
 | `app/models/social_profile.rb` | Модель блогера (platform, ext_id) |
 | `app/models/follower.rb` | Модель подписчика |
 | `app/models/subscription.rb` | Связь SocialProfile ↔ Follower |
-| `app/models/job_call.rb` | Вызов джобы (ETL-run) |
-| `app/models/service_call.rb` | Вызов сервиса внутри джобы (job_call_id, parent_service_call_id) |
+| `app/models/job_call.rb` | Вызов джобы (ETL-run) — *после деплоя MVP* |
+| `app/models/service_call.rb` | Вызов сервиса внутри джобы — *после деплоя MVP* |
 | `app/services/instagram/social_profile_service.rb` | Сервис синка SocialProfile |
 | `app/services/instagram/social_profile/subscriptions_service.rb` | Сервис Subscriptions (sync, sync_page) |
 | `app/jobs/instagram/sync_social_account_job.rb` | Джоба синка аккаунта (профиль + followings) |
